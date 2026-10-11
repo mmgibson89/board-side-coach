@@ -1,0 +1,938 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>body{margin:0}[hidden]{display:none!important}</style>
+<link rel="manifest" href="manifest.webmanifest"><meta name="theme-color" content="#2f6b45"><link rel="icon" href="icon-192.png"><link rel="apple-touch-icon" href="icon-192.png">
+<title>Board-Side Coach</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Narrow:wght@500;700&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a tournament table. Status line across the top, the board on the left, the coach's voice log on the right, the scoresheet under the board. */
+:root{
+  --paper:#f3f5f1; --surface:#fbfcfa; --sunk:#e7ebe4; --ink:#18201b; --muted:#5d6a61; --line:#cfd6cc;
+  --sq-light:#e6e2cc; --sq-dark:#5f8a68; --sq-mark:rgba(240,196,64,.55); --sq-sel:rgba(40,120,200,.45); --dot:rgba(24,32,27,.28);
+  --accent:#2f6b45; --accent-ink:#ffffff; --focus:#2878c8;
+  --q-best:#1f8a52; --q-good:#5e7d66; --q-inacc:#b8860b; --q-mistake:#d0651c; --q-blunder:#c43a2f;
+  --piece-w:#fbfbf4; --piece-b:#1a1f1c; --stroke-w:#1a1f1c; --stroke-b:#e9ecdf;
+  --f-display:"Archivo Narrow","Arial Narrow",system-ui,sans-serif;
+  --f-body:"Atkinson Hyperlegible",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+  --f-glyph:"DejaVu Sans","Segoe UI Symbol","Noto Sans Symbols 2","Apple Symbols",serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --paper:#111612; --surface:#18201a; --sunk:#0c100d; --ink:#e4ebe3; --muted:#9aa89d; --line:#2c3a30;
+  --sq-light:#b9b49a; --sq-dark:#3f6449; --sq-mark:rgba(230,190,60,.5); --sq-sel:rgba(80,150,230,.5); --dot:rgba(10,14,11,.35);
+  --accent:#5fb07c; --accent-ink:#0b130e; --focus:#6aaef0;
+  --q-best:#4cc283; --q-good:#8fae97; --q-inacc:#e0b23a; --q-mistake:#ee8a45; --q-blunder:#f0675a;
+  color-scheme:dark}}
+:root[data-theme="dark"]{
+  --paper:#111612; --surface:#18201a; --sunk:#0c100d; --ink:#e4ebe3; --muted:#9aa89d; --line:#2c3a30;
+  --sq-light:#b9b49a; --sq-dark:#3f6449; --sq-mark:rgba(230,190,60,.5); --sq-sel:rgba(80,150,230,.5); --dot:rgba(10,14,11,.35);
+  --accent:#5fb07c; --accent-ink:#0b130e; --focus:#6aaef0;
+  --q-best:#4cc283; --q-good:#8fae97; --q-inacc:#e0b23a; --q-mistake:#ee8a45; --q-blunder:#f0675a;
+  color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--paper);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.5}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.app{max-width:1200px;margin:0 auto;padding-inline:16px;padding-block:14px 40px;display:grid;gap:18px;
+  grid-template-columns:minmax(0,540px) minmax(0,1fr);
+  grid-template-areas:"top top" "status status" "board say" "board feed" "sheet feed";align-items:start}
+@media (max-width:880px){.app{grid-template-columns:minmax(0,1fr);grid-template-areas:"top" "status" "board" "say" "feed" "sheet"}}
+.top{grid-area:top;display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px}
+.brand{font-family:var(--f-display);font-weight:700;font-size:22px;letter-spacing:.01em;margin:0;margin-right:auto;text-wrap:balance}
+.brand span{color:var(--muted);font-weight:500}
+.pill{font-family:var(--f-display);font-size:12.5px;letter-spacing:.06em;text-transform:uppercase;padding:3px 9px;border-radius:999px;border:1px solid var(--line);color:var(--muted);display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.pill i{width:7px;height:7px;border-radius:50%;background:var(--muted);display:inline-block}
+.pill.ok i{background:var(--q-best)} .pill.warn i{background:var(--q-inacc)} .pill.bad i{background:var(--q-blunder)}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:7px 12px;cursor:pointer;line-height:1.2}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:700}
+.btn:disabled{opacity:.5;cursor:default}
+
+.status{grid-area:status;display:flex;align-items:center;gap:16px;padding-block:6px;border-top:2px solid var(--ink);border-bottom:1px solid var(--line)}
+.turnflag{width:22px;height:22px;border-radius:4px;border:2px solid var(--ink);flex:none}
+.turnflag.w{background:var(--piece-w)} .turnflag.b{background:var(--piece-b);border-color:var(--muted)}
+.statustext{font-family:var(--f-display);font-weight:700;font-size:clamp(22px,3.4vw,32px);line-height:1.15;margin:0;text-wrap:balance;min-width:0}
+.statussub{color:var(--muted);font-size:14px;margin:0}
+
+.boardcol{grid-area:board;display:grid;gap:8px}
+.boardwrap{display:grid;grid-template-columns:14px 30px minmax(0,1fr);grid-template-rows:auto auto 30px;column-gap:6px;row-gap:6px}
+.lastmove{grid-column:3;grid-row:1;display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap;padding:10px 14px;margin-bottom:2px;border-radius:8px;background:var(--surface);border:1px solid var(--line);border-left:5px solid var(--muted);min-width:0}
+.lastmove.engine{border-left-color:var(--accent)} .lastmove.you{border-left-color:var(--ink)}
+.lm-who{font-family:var(--f-display);font-size:12.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);min-width:56px}
+.lastmove.engine .lm-who{color:var(--accent)}
+.lm-main{font-family:var(--f-display);font-weight:700;font-size:clamp(18px,2.6vw,24px);line-height:1.2;display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
+.lm-sq{font-family:var(--f-mono);font-weight:600;background:var(--sunk);border:1px solid var(--line);border-radius:6px;padding:1px 8px}
+.lm-arrow{color:var(--muted);font-weight:500}
+.lm-extra{font-family:var(--f-body);font-weight:400;font-size:15px;color:var(--muted)}
+.lm-san{margin-left:auto;font-family:var(--f-mono);font-weight:600;font-size:16px}
+.ranks{grid-column:2;grid-row:2;display:grid;grid-template-rows:repeat(8,minmax(0,1fr))}
+.files{grid-column:3;grid-row:3;display:grid;grid-template-columns:repeat(8,minmax(0,1fr))}
+.ranks,.files{background:var(--sunk);border:1px solid var(--line);border-radius:4px}
+.ranks span,.files span{display:grid;place-items:center;font-family:var(--f-mono);font-weight:600;font-size:17px;color:var(--ink)}
+.ranks span.hit,.files span.hit{color:var(--accent);background:color-mix(in srgb,var(--sq-mark) 70%,transparent)}
+.evalbar{grid-column:1;grid-row:2;position:relative;border-radius:3px;overflow:hidden;background:var(--piece-b);border:1px solid var(--line)}
+.evalfill{position:absolute;left:0;right:0;bottom:0;height:50%;background:var(--piece-w);transition:height .5s ease}
+.evalbar.flip .evalfill{top:0;bottom:auto}
+.board{grid-column:3;grid-row:2;display:grid;grid-template-columns:repeat(8,minmax(0,1fr));grid-template-rows:repeat(8,minmax(0,1fr));aspect-ratio:1;max-width:100%;border-radius:4px;overflow:hidden;box-shadow:0 0 0 1px var(--line);user-select:none;touch-action:manipulation}
+.sq{position:relative;display:grid;place-items:center;cursor:pointer;container-type:size;min-height:0;aspect-ratio:1}
+.sq.l{background:var(--sq-light)} .sq.d{background:var(--sq-dark)}
+.sq.last::before{content:"";position:absolute;inset:0;background:var(--sq-mark)}
+.sq.sel::before{content:"";position:absolute;inset:0;background:var(--sq-sel)}
+.sq.check::before{content:"";position:absolute;inset:0;background:radial-gradient(circle,rgba(220,40,30,.8) 0%,rgba(220,40,30,.3) 55%,transparent 75%)}
+.sq.target::after{content:"";position:absolute;width:28%;height:28%;border-radius:50%;background:var(--dot)}
+.sq.target.occ::after{width:88%;height:88%;background:transparent;border:5px solid var(--dot)}
+.pc{position:relative;font-family:var(--f-glyph);font-size:84cqi;line-height:1;z-index:1;pointer-events:none}
+.pc.w{color:var(--piece-w);text-shadow:0 0 1px var(--stroke-w),1px 0 0 var(--stroke-w),-1px 0 0 var(--stroke-w),0 1px 0 var(--stroke-w),0 -1px 0 var(--stroke-w)}
+.pc.b{color:var(--piece-b);text-shadow:0 0 1px var(--stroke-b),0 0 0 var(--stroke-b)}
+.boardmeta{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 12px;color:var(--muted);font-size:13.5px;font-variant-numeric:tabular-nums;padding-left:56px}
+.boardmeta b{font-family:var(--f-mono);color:var(--ink);font-weight:600}
+
+.say{grid-area:say;display:grid;gap:10px;min-width:0}
+.sayrow{display:flex;gap:8px;align-items:stretch}
+.mic{flex:none;width:52px;border-radius:10px;border:1px solid var(--line);background:var(--surface);cursor:pointer;display:grid;place-items:center}
+.mic svg{width:22px;height:22px}
+.mic.on{background:var(--q-blunder);border-color:var(--q-blunder);color:#fff;animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{50%{box-shadow:0 0 0 6px color-mix(in srgb,var(--q-blunder) 25%,transparent)}}
+@media (prefers-reduced-motion:reduce){.mic.on{animation:none}.evalfill{transition:none}}
+#sayInput{flex:1;min-width:0;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:12px 14px;font-size:17px}
+#sayInput::placeholder{color:var(--muted)}
+.interim{min-height:1.3em;color:var(--muted);font-size:13.5px;margin:0}
+.quick{display:flex;flex-wrap:wrap;gap:6px}
+.quick .btn{font-size:14px;padding:6px 11px}
+.choices{display:flex;flex-wrap:wrap;gap:6px}
+.choices[hidden]{display:none!important}
+.choices .btn{font-family:var(--f-mono);font-size:14px}
+.note{font-size:13.5px;color:var(--muted);border-left:3px solid var(--q-inacc);padding:4px 0 4px 10px;margin:0}
+
+.feed{grid-area:feed;display:grid;gap:0;min-width:0;max-height:min(70vh,720px);overflow:auto;border-top:1px solid var(--line)}
+@media (max-width:880px){.feed{max-height:none}}
+.entry{display:grid;grid-template-columns:76px minmax(0,1fr);gap:10px;padding:10px 2px;border-bottom:1px solid var(--line)}
+.who{font-family:var(--f-display);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding-top:3px}
+.entry.coach .who{color:var(--accent)}
+.entry .body{min-width:0;overflow-wrap:anywhere}
+.entry.coach .body{font-size:16.5px;line-height:1.55}
+.entry.system .body{color:var(--muted);font-size:14px}
+.entry.thinking .body{color:var(--muted);font-style:italic}
+.san{font-family:var(--f-mono);font-weight:600}
+
+.sheet{grid-area:sheet;min-width:0}
+.sheethead{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin:4px 0 6px}
+.label{font-family:var(--f-display);font-size:12.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:0}
+.legend{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:12.5px;color:var(--muted)}
+.legend span{display:inline-flex;gap:4px;align-items:center}
+.sheetwrap{overflow-x:auto;border:1px solid var(--line);border-radius:6px;background:var(--surface);max-height:300px;overflow-y:auto}
+table{border-collapse:collapse;width:100%;font-family:var(--f-mono);font-size:14px;font-variant-numeric:tabular-nums}
+th{font-family:var(--f-display);font-weight:500;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);text-align:left;padding:6px 10px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--surface)}
+td{padding:5px 10px;border-bottom:1px solid var(--line)}
+td.n{color:var(--muted);width:44px}
+tr:nth-child(even) td{background:color-mix(in srgb,var(--sunk) 45%,transparent)}
+.ann{font-weight:700;margin-left:1px}
+.q-best{color:var(--q-best)} .q-good{color:var(--q-good)} .q-inaccuracy{color:var(--q-inacc)} .q-mistake{color:var(--q-mistake)} .q-blunder{color:var(--q-blunder)}
+.dotq{width:8px;height:8px;border-radius:50%;display:inline-block;background:currentColor}
+.empty{color:var(--muted);font-family:var(--f-body);font-size:14px;padding:12px 10px}
+
+.settings{grid-area:top;grid-row:2;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:16px;display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.settings[hidden]{display:none!important}
+.field{display:grid;gap:5px;min-width:0}
+.field label,.field .lab{font-family:var(--f-display);font-size:12.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.field select,.field input[type=number],.field input[type=password]{border:1px solid var(--line);background:var(--paper);border-radius:8px;padding:8px 10px;min-width:0;width:100%}
+.field small{color:var(--muted);font-size:12.5px;line-height:1.4}
+.seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{flex:1;border:0;background:var(--paper);padding:8px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);font-weight:700}
+.check{display:flex;gap:8px;align-items:center;font-size:14.5px}
+.setfoot{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
+</style>
+</head><body>
+
+<div class="app" id="app">
+  <header class="top">
+    <h1 class="brand">Board-Side Coach <span>· Stockfish + Claude</span></h1>
+    <span class="pill warn" id="enginePill"><i></i><span>Loading engine</span></span>
+    <span class="pill" id="coachPill"><i></i><span>Coach</span></span>
+    <button class="btn" id="settingsBtn" aria-expanded="false" aria-controls="settings">Settings</button>
+    <button class="btn" id="newBtn">New game</button>
+  </header>
+
+  <section class="settings" id="settings" hidden aria-label="Settings">
+    <div class="field"><span class="lab">You play</span>
+      <div class="seg" id="colorSeg"><button type="button" data-c="w" aria-pressed="true">White</button><button type="button" data-c="b" aria-pressed="false">Black</button></div>
+      <small>Takes effect on the next new game.</small></div>
+    <div class="field"><label for="oppSel">Opponent strength</label>
+      <select id="oppSel"><option value="800">About 800</option><option value="1000">About 1000</option><option value="1200" selected>About 1200</option><option value="1400">About 1400</option><option value="1600">About 1600</option><option value="1800">About 1800</option><option value="2000">About 2000</option></select>
+      <small>Approximate. Stockfish is held back by skill level and search depth.</small></div>
+    <div class="field"><label for="ratingIn">Your rating</label>
+      <input type="number" id="ratingIn" min="400" max="2800" step="50" value="1200">
+      <small>The coach pitches its explanations to this level.</small></div>
+    <div class="field"><label for="freqSel">Coach talks every</label>
+      <select id="freqSel"><option value="1">move</option><option value="2">2 of your moves</option><option value="3" selected>3 of your moves</option><option value="5">5 of your moves</option><option value="99">only when I ask</option></select>
+      <label class="check"><input type="checkbox" id="alertChk" checked> Flag mistakes straight away</label></div>
+    <div class="field"><span class="lab">Voice</span>
+      <label class="check"><input type="checkbox" id="speakChk" checked> Speak out loud</label>
+      <select id="voiceSel" aria-label="Voice"><option value="">Default voice</option></select>
+      <label for="rateIn" class="lab" style="margin-top:4px">Speaking speed</label>
+      <input type="range" id="rateIn" min="0.8" max="1.4" step="0.05" value="1"></div>
+    <div class="field"><label for="langSel">Listening accent</label>
+      <select id="langSel"><option value="en-AU">English (Australia)</option><option value="en-GB">English (UK)</option><option value="en-US">English (US)</option></select>
+      <small>Used by the hands-free microphone.</small></div>
+    <div class="field" id="keyField" hidden><label for="keyIn">Anthropic API key</label>
+      <input type="password" id="keyIn" autocomplete="off" placeholder="sk-ant-…">
+      <small>Only needed when this file runs outside Claude. Stored in this browser only.</small></div>
+    <div class="setfoot"><button class="btn" id="closeSettings">Done</button><button class="btn primary" id="applyNew">Start new game with these settings</button></div>
+  </section>
+
+  <section class="status" aria-live="polite">
+    <div class="turnflag w" id="turnFlag" title="Side to move"></div>
+    <div style="min-width:0">
+      <p class="statustext" id="statusText">Loading the engine…</p>
+      <p class="statussub" id="statusSub">Say or type moves like “knight to f3”, “d2 to d4” or “bishop takes f6”.</p>
+    </div>
+  </section>
+
+  <section class="boardcol" aria-label="Board">
+    <div class="boardwrap">
+      <div class="lastmove" id="lastMove" aria-live="polite"><span class="lm-who">Start</span><span class="lm-main">No moves yet</span></div>
+      <div class="evalbar" id="evalBar" title="Engine evaluation"><div class="evalfill" id="evalFill"></div></div>
+      <div class="ranks" id="ranks" aria-hidden="true"></div>
+      <div class="board" id="board" role="grid" aria-label="Chess board"></div>
+      <div class="files" id="files" aria-hidden="true"></div>
+    </div>
+    <div class="boardmeta"><span>Evaluation <b id="evalText">0.0</b></span><span id="wpText">Your winning chances 50%</span><span>Tap a piece, then a square, to move by hand</span></div>
+  </section>
+
+  <section class="say" aria-label="Talk to the coach">
+    <form class="sayrow" id="sayForm" autocomplete="off">
+      <button type="button" class="mic" id="micBtn" aria-pressed="false" title="Hands-free listening">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><path d="M12 17v5"/></svg>
+        <span class="sr" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Hands-free listening</span>
+      </button>
+      <input id="sayInput" type="text" enterkeyhint="send" placeholder="Your move or a question…" aria-label="Your move or a question">
+      <button class="btn primary" type="submit">Send</button>
+    </form>
+    <p class="interim" id="interim"></p>
+    <div class="choices" id="choices" hidden></div>
+    <p class="note" id="micNote" hidden></p>
+    <div class="quick">
+      <button class="btn" data-cmd="hint">Hint</button>
+      <button class="btn" data-cmd="review">How am I doing?</button>
+      <button class="btn" data-cmd="undo">Take back</button>
+      <button class="btn" data-cmd="readboard">Read the board</button>
+      <button class="btn" data-cmd="repeat">Repeat</button>
+      <button class="btn" data-cmd="hush">Stop talking</button>
+    </div>
+  </section>
+
+  <section class="feed" id="feed" aria-label="Coach log" aria-live="polite"></section>
+
+  <section class="sheet" aria-label="Scoresheet">
+    <div class="sheethead"><p class="label">Scoresheet</p>
+      <div class="legend"><span class="q-best"><i class="dotq"></i>Best</span><span class="q-inaccuracy"><i class="dotq"></i>?! Inaccuracy</span><span class="q-mistake"><i class="dotq"></i>? Mistake</span><span class="q-blunder"><i class="dotq"></i>?? Blunder</span></div></div>
+    <div class="sheetwrap"><table><thead><tr><th>#</th><th>White</th><th>Black</th></tr></thead><tbody id="sheetBody"></tbody></table></div>
+  </section>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chess.js@0.10.3/chess.js"></script>
+<script>
+"use strict";
+/* ---------- constants ---------- */
+const SF_URL = "https://cdn.jsdelivr.net/npm/stockfish.js@10.0.2/stockfish.js";
+const LEVELS = {800:{skill:0,depth:1,mt:150},1000:{skill:1,depth:2,mt:200},1200:{skill:3,depth:4,mt:300},1400:{skill:5,depth:6,mt:400},1600:{skill:8,depth:8,mt:500},1800:{skill:11,depth:10,mt:600},2000:{skill:14,depth:12,mt:800}};
+const ANALYSIS = {depth:12, mt:1400};
+const PIECE_NAME = {p:"pawn",n:"knight",b:"bishop",r:"rook",q:"queen",k:"king"};
+const GLYPH = {k:"♚",q:"♛",r:"♜",b:"♝",n:"♞",p:"♟"};
+const ANN = {best:"",good:"",inaccuracy:"?!",mistake:"?",blunder:"??"};
+const STORE = "boardside-coach.v1";
+
+/*PARSER-START*/
+const P_WORDS = {knight:"n",knights:"n",night:"n",nights:"n",nite:"n",horse:"n",bishop:"b",bishops:"b",rook:"r",rooks:"r",rock:"r",brook:"r",ruke:"r",queen:"q",queens:"q",king:"k",kings:"k",pawn:"p",pawns:"p",pond:"p",prawn:"p",pon:"p",palm:"p",porn:"p"};
+const F_WORDS = {a:"a",ay:"a",eh:"a",hey:"a",alpha:"a",b:"b",be:"b",bee:"b",bravo:"b",c:"c",see:"c",sea:"c",si:"c",charlie:"c",d:"d",dee:"d",delta:"d",the:"d",e:"e",ee:"e",echo:"e",f:"f",ef:"f",eff:"f",foxtrot:"f",g:"g",gee:"g",ji:"g",golf:"g",h:"h",aitch:"h",age:"h",hotel:"h",each:"h"};
+const N_WORDS = {"1":"1","2":"2","3":"3","4":"4","5":"5","6":"6","7":"7","8":"8",one:"1",won:"1",two:"2",too:"2",to:"2",three:"3",tree:"3",free:"3",four:"4",for:"4",fore:"4",five:"5",six:"6",sex:"6",seven:"7",eight:"8",ate:"8"};
+const WHOLE = {before:"b4",befour:"b4",seafor:"c4",defor:"d4",ate:null};
+const CAPTURE = new Set(["takes","take","took","taking","captures","capture","captured","x","eats","grabs","by"]);
+
+function normTokens(text){
+  let t = " " + String(text).toLowerCase().replace(/[’']/g,"").replace(/o-o-o|0-0-0/g," castle queenside ").replace(/o-o|0-0/g," castle kingside ") + " ";
+  t = t.replace(/king ?side|short castle|castle short/g," kingside ").replace(/queen ?side|long castle|castle long/g," queenside ");
+  t = t.replace(/[^a-z0-9\s]/g," ");
+  const raw = t.split(/\s+/).filter(Boolean);
+  const out = [];
+  for (const w of raw){
+    if (WHOLE[w]) { out.push(WHOLE[w]); continue; }
+    // split glued squares like d2d4, nf3, bxc3, e2e4
+    const m = w.match(/^([nbrqk])?([a-h][1-8])?(x)?([a-h][1-8])$/);
+    if (m && w.length>2){ if(m[1]) out.push(m[1]==="n"?"knight":PIECE_NAME[m[1]]); if(m[2]) out.push(m[2]); if(m[3]) out.push("takes"); out.push(m[4]); continue; }
+    const m2 = w.match(/^([a-h])([1-8])$/); if (m2){ out.push(w); continue; }
+    const m3 = w.match(/^([a-h])(\d)(\d)$/); if (m3){ out.push(m3[1]+m3[2]); continue; } // "e44" noise
+    out.push(w);
+  }
+  return out;
+}
+function parseSpoken(text){
+  const tk = normTokens(text);
+  const r = {squares:[], mover:null, captured:null, capture:false, castle:null, tokens:tk};
+  let afterCapture = false;
+  for (let i=0;i<tk.length;i++){
+    const w = tk[i], nx = tk[i+1], nx2 = tk[i+2];
+    if (/^[a-h][1-8]$/.test(w)){ r.squares.push(w); continue; }
+    if (w==="castle"||w==="castles"||w==="castling"||w==="castled"){ r.castle = r.castle || "k"; continue; }
+    if (w==="kingside"){ r.castle="k"; continue; }
+    if (w==="queenside"){ r.castle="q"; continue; }
+    if (CAPTURE.has(w)){ r.capture = true; afterCapture = true; continue; }
+    const file = F_WORDS[w];
+    if (file && nx !== undefined){
+      // "e to e4" => e2 e4 ; "to" is a separator otherwise
+      if ((nx==="to"||nx==="too") && nx2 && (/^[a-h][1-8]$/.test(nx2) || (F_WORDS[nx2] && N_WORDS[tk[i+3]]))){ r.squares.push(file+"2"); i+=1; continue; }
+      if (nx!=="to" && N_WORDS[nx]){ r.squares.push(file+N_WORDS[nx]); i+=1; continue; }
+    }
+    const pc = P_WORDS[w];
+    if (pc){ if (afterCapture) r.captured = r.captured || pc; else r.mover = r.mover || pc; continue; }
+  }
+  return r;
+}
+/* Resolve a parse against the legal moves. Returns {move} | {choices:[...]} | {suggest} | {error} */
+function resolveMove(game, text){
+  const legal = game.moves({verbose:true});
+  const trimmed = String(text).trim();
+  // typed notation first
+  if (/^[a-h1-8nbrqkoNBRQKO0x=+#\-]{2,8}$/.test(trimmed)){
+    const tries = [trimmed, trimmed[0].toUpperCase()+trimmed.slice(1)];
+    for (const t of tries){ const c = new Chess(game.fen()); const mv = c.move(t,{sloppy:true}); if (mv) return {move: legal.find(m=>m.from===mv.from&&m.to===mv.to&&(m.promotion||"")===(mv.promotion||""))}; }
+  }
+  const p = parseSpoken(text);
+  let cands = legal.filter(m=>!m.promotion || m.promotion==="q");
+  if (p.castle){
+    const c = cands.filter(m=> p.castle==="q" ? m.flags.includes("q") : m.flags.includes("k"));
+    if (c.length===1) return {move:c[0], parse:p};
+    return {error:"Castling isn't legal right now.", parse:p};
+  }
+  const sq = p.squares;
+  if (sq.length>=2){
+    const from = sq[0], to = sq[sq.length-1];
+    const exact = cands.filter(m=>m.from===from && m.to===to);
+    if (exact.length) return {move:exact[0], parse:p};
+    let alt = cands.filter(m=>m.to===to);
+    if (p.mover) alt = alt.filter(m=>m.piece===p.mover);
+    const onFrom = game.get(from);
+    if (alt.length===1) return {suggest:alt[0], why: onFrom ? `The ${PIECE_NAME[onFrom.type]} on ${from} can't reach ${to}.` : `There's no piece on ${from}.`, parse:p};
+    if (alt.length>1) return {choices:alt, why:`Nothing on ${from} can go to ${to}.`, parse:p};
+    return {error:`No legal move from ${from} to ${to}.`, parse:p};
+  }
+  if (sq.length===1){
+    const to = sq[0];
+    let c = cands.filter(m=>m.to===to);
+    if (p.mover) c = c.filter(m=>m.piece===p.mover);
+    if (p.capture && !p.mover && c.some(m=>m.captured)) c = c.filter(m=>m.captured);
+    if (!p.mover && c.length>1){ const pawns = c.filter(m=>m.piece==="p"); if (pawns.length===1 && !p.capture) c = pawns; }
+    if (c.length===1) return {move:c[0], parse:p};
+    if (c.length>1) return {choices:c, parse:p};
+    if (p.mover) return {error:`No ${PIECE_NAME[p.mover]} can move to ${to}.`, parse:p};
+    return {error:`Nothing can move to ${to}.`, parse:p};
+  }
+  if (p.mover && p.captured){
+    const c = cands.filter(m=>m.piece===p.mover && m.captured===p.captured);
+    if (c.length===1) return {move:c[0], parse:p};
+    if (c.length>1) return {choices:c, parse:p};
+    return {error:`Your ${PIECE_NAME[p.mover]} can't take a ${PIECE_NAME[p.captured]}.`, parse:p};
+  }
+  if (p.capture && p.captured){
+    const c = cands.filter(m=>m.captured===p.captured);
+    if (c.length===1) return {move:c[0], parse:p};
+    if (c.length>1) return {choices:c, parse:p};
+  }
+  return {none:true, parse:p};
+}
+function speakSan(san){
+  const suf = san.endsWith("#") ? ", checkmate" : san.endsWith("+") ? ", check" : "";
+  const s = san.replace(/[+#]/g,"");
+  if (s==="O-O-O") return "castles queenside"+suf;
+  if (s==="O-O") return "castles kingside"+suf;
+  const m = s.match(/^([NBRQK])?([a-h])?([1-8])?(x)?([a-h][1-8])(?:=([NBRQ]))?$/);
+  if (!m) return san;
+  const [,pc,df,dr,x,to,promo] = m;
+  let out;
+  if (pc){ out = PIECE_NAME[pc.toLowerCase()] + ((df||dr) ? " from "+(df||"")+(dr||"") : "") + (x?" takes ":" to ") + to; }
+  else { out = x ? `${df} takes ${to}` : to; }
+  if (promo) out += ", promotes to " + PIECE_NAME[promo.toLowerCase()];
+  return out + suf;
+}
+/*PARSER-END*/
+
+/* ---------- state ---------- */
+const game = new Chess();
+let recs = [];            // one per ply: {by,san,uci,color,quality,wpBefore,wpAfter,bestSan,bestLine,replySan,replyLine}
+let gen = 0, thinking = false, pending = null, selected = null, lastSpoken = "", sinceCoach = 0, replyPromise = Promise.resolve();
+let lastEval = null;
+const analysisCache = new Map();
+const qa = [];            // recent question/answer turns
+const settings = {color:"w", opp:1200, rating:1200, freq:3, alert:true, speak:true, voice:"", rate:1, lang:"en-AU", key:""};
+let gameColor = "w";      // colour for the game in progress
+
+const $ = id => document.getElementById(id);
+function store(){ try{ localStorage.setItem(STORE, JSON.stringify({settings, gameColor, moves: recs.map(r=>r.uci), recs})); }catch(e){} }
+function restore(){
+  try{ const d = JSON.parse(localStorage.getItem(STORE)||"null"); if(!d) return false;
+    Object.assign(settings, d.settings||{}); gameColor = d.gameColor || settings.color;
+    if (Array.isArray(d.moves) && d.moves.length){ for (const u of d.moves){ if(!applyUci(u)) break; } recs = (d.recs||[]).slice(0, game.history().length); }
+    return true; }catch(e){ return false; }
+}
+function applyUci(u){ if(!u || u.length<4) return null; return game.move({from:u.slice(0,2), to:u.slice(2,4), promotion:u[4]||"q"}); }
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
+const userTurn = () => game.turn() === gameColor;
+const oppName = () => gameColor==="w" ? "Black" : "White";
+
+/* ---------- engine ---------- */
+class Engine{
+  constructor(){ this.listeners=[]; this.queue=Promise.resolve(); this.ok=false; }
+  init(){
+    return new Promise((resolve,reject)=>{
+      try{
+        const blob = new Blob([`importScripts(${JSON.stringify(SF_URL)});`],{type:"application/javascript"});
+        this.w = new Worker(URL.createObjectURL(blob));
+      }catch(e){ reject(e); return; }
+      this.w.onmessage = e => { const line = String(e.data); for (const f of this.listeners.slice()) f(line); };
+      this.w.onerror = e => reject(e);
+      const t = setTimeout(()=>reject(new Error("timeout")), 30000);
+      this.wait("uci", l=>l==="uciok").then(()=>this.wait("isready", l=>l==="readyok")).then(()=>{ clearTimeout(t); this.ok=true; resolve(); }, reject);
+    });
+  }
+  send(c){ this.w.postMessage(c); }
+  wait(cmd, done, onLine){ return new Promise(res=>{ const f = l=>{ if(onLine) onLine(l); if(done(l)){ this.listeners=this.listeners.filter(x=>x!==f); res(l); } }; this.listeners.push(f); if(cmd) this.send(cmd); }); }
+  run(task){ const p = this.queue.then(task); this.queue = p.catch(()=>{}); return p; }
+  search(fen, {depth, mt, skill}){
+    return this.run(async ()=>{
+      this.send("setoption name Skill Level value "+skill);
+      this.send("position fen "+fen);
+      let info = {};
+      const best = await this.wait(`go depth ${depth} movetime ${mt}`, l=>l.startsWith("bestmove"), l=>{
+        if (l.startsWith("info") && l.includes(" score ") && l.includes(" pv ")) info = parseInfo(l);
+      });
+      return {bestmove: best.split(" ")[1], ...info};
+    });
+  }
+  newGame(){ return this.run(async()=>{ this.send("ucinewgame"); await this.wait("isready", l=>l==="readyok"); }); }
+}
+function parseInfo(l){ const t=l.split(" "), o={}; for(let i=0;i<t.length;i++){ if(t[i]==="depth") o.depth=+t[i+1]; else if(t[i]==="score"){ if(t[i+1]==="cp") o.cp=+t[i+2]; else if(t[i+1]==="mate") o.mate=+t[i+2]; } else if(t[i]==="pv"){ o.pv=t.slice(i+1); break; } } return o; }
+const player = new Engine(), analyst = new Engine();
+let engineOk = false;
+
+function wpFromCp(cp){ return 50 + 50*(2/(1+Math.exp(-0.00368208*cp)) - 1); }
+function analysisFor(fen){
+  if (analysisCache.has(fen)) return analysisCache.get(fen);
+  const c = new Chess(fen);
+  let p;
+  if (c.game_over()){
+    const cpW = c.in_checkmate() ? (c.turn()==="w" ? -1000 : 1000) : 0;
+    p = Promise.resolve({fen, cpW, mateW:null, wpW: wpFromCp(cpW), pv:[], bestmove:null, terminal:true});
+  } else if (!engineOk){ p = Promise.reject(new Error("engine")); p.catch(()=>{}); return p; }
+  else {
+    p = analyst.search(fen, {depth:ANALYSIS.depth, mt:ANALYSIS.mt, skill:20}).then(r=>{
+      const pov = c.turn()==="w" ? 1 : -1;
+      const mateW = r.mate!=null ? r.mate*pov : null;
+      const cpW = mateW!=null ? (mateW>0?1000:-1000) : Math.max(-1000, Math.min(1000, (r.cp||0)*pov));
+      return {fen, cpW, mateW, rawCpW:(r.cp||0)*pov, wpW: wpFromCp(cpW), pv: r.pv||[], bestmove: r.bestmove, depth: r.depth};
+    });
+  }
+  analysisCache.set(fen, p);
+  if (analysisCache.size>200){ analysisCache.delete(analysisCache.keys().next().value); }
+  return p;
+}
+function uciLine(fen, uciList, max=5){
+  const c = new Chess(fen), out = [];
+  for (const u of (uciList||[]).slice(0,max)){ const mv = c.move({from:u.slice(0,2),to:u.slice(2,4),promotion:u[4]||"q"}); if(!mv) break; out.push(mv.san); }
+  return out;
+}
+function classify(pre, post, uci){
+  const youW = gameColor==="w";
+  const before = youW ? pre.wpW : 100-pre.wpW, after = youW ? post.wpW : 100-post.wpW;
+  const drop = before - after;
+  let q = "good";
+  if (pre.bestmove && uci.slice(0,4)===pre.bestmove.slice(0,4)) q = "best";
+  else if (drop>=15) q = "blunder"; else if (drop>=10) q = "mistake"; else if (drop>=5) q = "inaccuracy";
+  return {q, before:Math.round(before), after:Math.round(after)};
+}
+
+/* ---------- speech out ---------- */
+const sq = []; let speaking = false, voices = [];
+function loadVoices(){
+  try{ voices = (speechSynthesis.getVoices()||[]).filter(v=>/^en/i.test(v.lang)); }catch(e){ voices = []; }
+  const sel = $("voiceSel"), cur = settings.voice; sel.textContent = "";
+  const d = document.createElement("option"); d.value=""; d.textContent="Default voice"; sel.append(d);
+  for (const v of voices){ const o=document.createElement("option"); o.value=v.name; o.textContent=`${v.name} (${v.lang})`; sel.append(o); }
+  sel.value = voices.some(v=>v.name===cur) ? cur : "";
+}
+if ("speechSynthesis" in window){ loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
+function speak(text){
+  lastSpoken = text;
+  if (!settings.speak || !("speechSynthesis" in window)) return Promise.resolve();
+  const parts = String(text).match(/[^.!?]+[.!?]*/g) || [text];
+  return new Promise(res=>{ parts.forEach((p,i)=>sq.push({text:p.trim(), res: i===parts.length-1 ? res : null})); pump(); });
+}
+function pump(){
+  if (speaking || !sq.length) return;
+  const item = sq.shift(); if (!item.text){ item.res && item.res(); pump(); return; }
+  speaking = true; muteUntil = Infinity;
+  const u = new SpeechSynthesisUtterance(item.text);
+  const v = voices.find(v=>v.name===settings.voice) || voices.find(v=>v.lang==="en-AU") || voices.find(v=>v.lang==="en-GB") || null;
+  if (v) u.voice = v; u.lang = v ? v.lang : "en-AU"; u.rate = settings.rate;
+  let done = false; const fin = ()=>{ if(done) return; done=true; speaking=false; if(!sq.length) muteUntil = Date.now()+700; item.res && item.res(); pump(); };
+  u.onend = fin; u.onerror = fin; setTimeout(fin, 4000 + item.text.length*120);
+  speechSynthesis.speak(u);
+}
+function hush(){ sq.length = 0; try{ speechSynthesis.cancel(); }catch(e){} speaking=false; muteUntil = 0; }
+
+/* ---------- speech in ---------- */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, wantListen = false, srActive = false, muteUntil = 0;
+// The mic stays open the whole time; while the coach is talking (and for a moment after) we simply ignore what it hears.
+const heardWhileTalking = () => speaking || Date.now() < muteUntil;
+function setMic(on){ $("micBtn").classList.toggle("on", on); $("micBtn").setAttribute("aria-pressed", String(on)); }
+function micBlocked(reason){
+  wantListen = false; setMic(false);
+  const n = $("micNote"); n.hidden = false;
+  n.textContent = reason || "The microphone is blocked in this view. Tap the move box and use your keyboard's dictation mic instead, or open the standalone copy of this page in Chrome for hands-free listening.";
+  $("sayInput").focus();
+}
+function startListening(){
+  if (!SR){ micBlocked("This browser has no built-in speech recognition. Use your keyboard's dictation mic in the move box, or open the page in Chrome."); return; }
+  wantListen = true; setMic(true);
+  if (!rec){
+    rec = new SR(); rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 3;
+    rec.onresult = e => {
+      for (let i=e.resultIndex;i<e.results.length;i++){
+        const r = e.results[i];
+        if (heardWhileTalking()){ $("interim").textContent = ""; continue; }
+        if (r.isFinal){ $("interim").textContent = ""; const alts = Array.from(r).map(a=>a.transcript); handleInput(alts[0], alts.slice(1), "voice"); }
+        else $("interim").textContent = "Hearing: " + r[0].transcript;
+      }
+    };
+    rec.onerror = e => { if (e.error==="not-allowed" || e.error==="service-not-allowed" || e.error==="audio-capture") micBlocked(); };
+    rec.onend = () => { srActive = false; if (wantListen) setTimeout(()=>{ if(wantListen && !srActive) tryStart(); }, 250); };
+  }
+  rec.lang = settings.lang; tryStart();
+  if (location.protocol === "file:"){
+    const n = $("micNote"); n.hidden = false;
+    n.textContent = "Chrome may still ask for the mic now and then on a file opened straight from your computer. Choose “Allow while visiting the site”. For no prompts at all, open it with the “Start Board-Side Coach” launcher instead of double-clicking this file.";
+  }
+}
+function tryStart(){ try{ rec.start(); srActive = true; }catch(e){} }
+function stopListening(){ wantListen = false; setMic(false); try{ rec && rec.stop(); }catch(e){} }
+
+/* ---------- Claude ---------- */
+let sampleFn = null, aiOff = false;
+async function initClaude(){
+  if (window.claude && typeof window.claude.use === "function"){
+    try{ sampleFn = await window.claude.use("sample"); }catch(e){ sampleFn = null; }
+  } else { $("keyField").hidden = false; }
+  updateCoachPill();
+}
+function coachMode(){ if (aiOff) return "engine"; if (sampleFn) return "claude"; if (settings.key) return "api"; return "engine"; }
+function updateCoachPill(){
+  const m = coachMode(), p = $("coachPill");
+  p.className = "pill " + (m==="engine" ? "warn" : "ok");
+  p.lastElementChild.textContent = m==="engine" ? "Engine notes only" : "Claude coach on";
+}
+async function askClaude(prompt, onText){
+  const m = coachMode();
+  if (m==="claude"){
+    try{ const r = await sampleFn(prompt, {modelTier:"quick", onText:({text})=>onText(text), cache:false}); return r.text; }
+    catch(e){
+      if (["not_granted","sampling_disabled","not_declared","capability_disabled","capability_removed"].includes(e && e.code)){ aiOff = true; updateCoachPill(); feedAdd("system","Claude coaching isn't available here, so I'll use plain engine notes."); }
+      throw e;
+    }
+  }
+  if (m==="api"){
+    const res = await fetch("https://api.anthropic.com/v1/messages", {method:"POST", headers:{"content-type":"application/json","x-api-key":settings.key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+      body: JSON.stringify({model:"claude-sonnet-5-5", max_tokens:400, messages:[{role:"user", content:prompt}]})});
+    if (!res.ok) throw {code:"api", message:"HTTP "+res.status};
+    const j = await res.json(); const t = (j.content||[]).map(b=>b.text||"").join("").trim(); onText(t); return t;
+  }
+  throw {code:"no_ai"};
+}
+function moveListText(){
+  const h = game.history(); let s = "";
+  for (let i=0;i<h.length;i++){ if (i%2===0) s += (i/2+1)+". "; s += h[i] + " "; }
+  return s.trim() || "(no moves yet)";
+}
+function boardText(){
+  const groups = {w:{}, b:{}};
+  const b = game.board();
+  for (let r=0;r<8;r++) for (let f=0;f<8;f++){ const p=b[r][f]; if(!p) continue; const sqn="abcdefgh"[f]+(8-r); (groups[p.color][p.type] = groups[p.color][p.type]||[]).push(sqn); }
+  const order = ["k","q","r","b","n","p"];
+  const side = c => order.filter(t=>groups[c][t]).map(t=>{ const l=groups[c][t]; return (l.length>1 ? PIECE_NAME[t]+"s " : PIECE_NAME[t]+" ") + l.join(", "); }).join("; ");
+  return {white: side("w"), black: side("b")};
+}
+function recFact(r){
+  const ply = recs.indexOf(r); const num = Math.floor(ply/2)+1;
+  let s = `- Move ${num} (${r.color==="w"?"White":"Black"}, the student): played ${r.san}. Verdict: ${r.quality}. Student's winning chances went ${r.wpBefore}% -> ${r.wpAfter}%.`;
+  if (r.quality!=="best" && r.bestSan) s += ` Engine's best move instead: ${r.bestSan}` + (r.bestLine && r.bestLine.length>1 ? ` (line: ${r.bestLine.join(" ")})` : "") + ".";
+  if (r.replySan) s += ` Strongest reply for the opponent now: ${r.replySan}` + (r.replyLine && r.replyLine.length>1 ? ` (line: ${r.replyLine.join(" ")})` : "") + ".";
+  return s;
+}
+function buildPrompt(kind, extra={}){
+  const bt = boardText();
+  const youName = gameColor==="w" ? "White" : "Black";
+  const wpYou = lastEval ? Math.round(gameColor==="w" ? lastEval.wpW : 100-lastEval.wpW) : null;
+  const lines = [
+`You are a warm, direct chess coach speaking OUT LOUD to a student rated about ${settings.rating}. The student plays ${youName} on a physical board against Stockfish set to roughly ${settings.opp} strength.`,
+`Rules: base every claim about which moves are good, bad, or win material ONLY on the engine facts below. Do not invent or calculate new variations. Never mention centipawns or raw numbers; you may say "a big swing" or "roughly even". Speak in plain spoken English: say moves like "knight to f3", "bishop takes e5", "castle kingside". No markdown, no lists, no notation symbols, no move numbers with dots. Teach one idea a ${settings.rating} player can reuse (development, king safety, loose pieces, centre, piece activity, the tactic shown in an engine line). Be encouraging but honest.`];
+  if (kind==="alert") lines.push(`Task: the student just made a ${extra.rec.quality}. In 2 to 3 sentences (under 60 words), say what goes wrong using the opponent's strongest reply, name the better move and why, and end by reminding them they can say "take back".`);
+  if (kind==="periodic") lines.push(`Task: brief check-in on the student's last few moves. 2 to 4 sentences, under 70 words. Praise anything good specifically, flag the biggest issue if any, and give one thing to aim for in the next few moves.`);
+  if (kind==="hint") lines.push(`Task: give a hint for the current position in 1 to 2 sentences, under 40 words. Point at the idea or the piece to look at, but do not name the exact move or destination square. The engine's best move here is ${extra.bestSan} (line: ${(extra.bestLine||[]).join(" ")}).`);
+  if (kind==="review") lines.push(`Task: honest review of the game so far in 4 to 6 sentences, under 110 words: the overall picture, two things done well, and the one habit that would gain the most rating points.`);
+  if (kind==="question") lines.push(`Task: answer the student's question in under 80 words. If the engine facts don't settle it, say what you can about general principles and say the engine would need to check specifics. Question: "${extra.question}"`);
+  lines.push("", `Game so far: ${moveListText()}`, `Side to move: ${game.turn()==="w"?"White":"Black"}.`, `White pieces: ${bt.white}.`, `Black pieces: ${bt.black}.`, `FEN: ${game.fen()}`);
+  if (wpYou!=null) lines.push(`Current engine assessment: the student's winning chances are about ${wpYou}%.`);
+  const facts = (extra.recs || []).map(recFact);
+  if (facts.length) lines.push("Engine facts about the student's moves:", ...facts);
+  if (kind==="question" && qa.length){ lines.push("Earlier in this chat:"); for (const t of qa.slice(-4)) lines.push(`${t.role==="user"?"Student":"Coach"}: ${t.content}`); }
+  lines.push("", "Reply with only the words you would say out loud.");
+  return lines.join("\n");
+}
+function fallbackText(kind, extra={}){
+  const r = extra.rec;
+  if (kind==="alert" && r) return `That was a ${r.quality}. ${r.bestSan ? "Better was "+speakSan(r.bestSan)+"." : ""} ${r.replySan ? oppName()+" can now answer with "+speakSan(r.replySan)+"." : ""} Say take back if you want to try again.`;
+  if (kind==="hint") return extra.bestSan ? `Look at what your ${PIECE_NAME[(extra.bestPiece||"p")]} can do.` : "No hint available yet.";
+  const mine = (extra.recs||[]);
+  const counts = {}; for (const x of mine) counts[x.quality]=(counts[x.quality]||0)+1;
+  const parts = Object.entries(counts).map(([k,v])=>`${v} ${k}${v>1&&k!=="best"?"s":""}`);
+  const wp = lastEval ? Math.round(gameColor==="w"?lastEval.wpW:100-lastEval.wpW) : 50;
+  if (kind==="question") return "I need Claude coaching switched on to answer questions. The engine can still judge your moves.";
+  return `${mine.length ? "Your recent moves: "+parts.join(", ")+"." : ""} Your winning chances are about ${wp} percent.`;
+}
+let coachBusy = Promise.resolve();
+function coach(kind, extra={}){
+  const g = gen;
+  const entry = feedAdd("coach","Thinking…", true);
+  const job = coachBusy.then(async ()=>{
+    let text;
+    try{ text = await askClaude(buildPrompt(kind, extra), t=>{ entry.body.textContent = t; entry.el.classList.remove("thinking"); }); }
+    catch(e){ text = fallbackText(kind, extra).replace(/\s+/g," ").trim(); }
+    entry.body.textContent = text; entry.el.classList.remove("thinking");
+    if (kind==="question"){ qa.push({role:"user",content:extra.question},{role:"assistant",content:text}); if(qa.length>8) qa.splice(0,qa.length-8); }
+    await (extra.after || Promise.resolve());
+    if (g===gen || kind==="review") speak(text);
+  });
+  coachBusy = job.catch(()=>{});
+  return job;
+}
+
+/* ---------- UI: board ---------- */
+function renderBoard(){
+  const el = $("board"); el.textContent = "";
+  const files = "abcdefgh".split(""), ranks = [8,7,6,5,4,3,2,1];
+  if (gameColor==="b"){ files.reverse(); ranks.reverse(); }
+  const hist = game.history({verbose:true}); const last = hist[hist.length-1];
+  let checkSq = null;
+  if (game.in_check()){ const b=game.board(); for(let r=0;r<8;r++)for(let f=0;f<8;f++){ const p=b[r][f]; if(p&&p.type==="k"&&p.color===game.turn()) checkSq="abcdefgh"[f]+(8-r); } }
+  const targets = selected ? game.moves({square:selected, verbose:true}).map(m=>m.to) : [];
+  ranks.forEach((rk,ri)=>files.forEach((fl,fi)=>{
+    const s = fl+rk, d = document.createElement("div");
+    const dark = ("abcdefgh".indexOf(fl) + rk) % 2 === 1;
+    d.className = "sq " + (dark ? "d" : "l");
+    d.dataset.sq = s; d.setAttribute("role","gridcell");
+    if (last && (last.from===s || last.to===s)) d.classList.add("last");
+    if (selected===s) d.classList.add("sel");
+    if (checkSq===s) d.classList.add("check");
+    const p = game.get(s);
+    if (targets.includes(s)){ d.classList.add("target"); if (p) d.classList.add("occ"); }
+    if (p){ const g=document.createElement("span"); g.className="pc "+p.color; g.textContent = GLYPH[p.type]+"︎"; d.append(g); d.setAttribute("aria-label", `${s} ${p.color==="w"?"white":"black"} ${PIECE_NAME[p.type]}`); }
+    else d.setAttribute("aria-label", s);
+    el.append(d);
+  }));
+  // coordinate strips outside the board; the last move's squares are highlighted
+  const hitF = last ? [last.from[0], last.to[0]] : [], hitR = last ? [last.from[1], last.to[1]] : [];
+  const rEl = $("ranks"), fEl = $("files"); rEl.textContent = ""; fEl.textContent = "";
+  for (const rk of ranks){ const s=document.createElement("span"); s.textContent=rk; if (hitR.includes(String(rk))) s.className="hit"; rEl.append(s); }
+  for (const fl of files){ const s=document.createElement("span"); s.textContent=fl; if (hitF.includes(fl)) s.className="hit"; fEl.append(s); }
+  $("turnFlag").className = "turnflag " + game.turn();
+  $("evalBar").classList.toggle("flip", gameColor==="b");
+  renderLastMove();
+}
+function renderLastMove(){
+  const el = $("lastMove"); el.textContent = "";
+  const hist = game.history({verbose:true}); const m = hist[hist.length-1];
+  const add = (cls, txt, parent=el) => { const s=document.createElement("span"); s.className=cls; s.textContent=txt; parent.append(s); return s; };
+  if (!m){ el.className = "lastmove"; add("lm-who","Start"); add("lm-main", game.turn()===gameColor ? "No moves yet. Your move." : "No moves yet. The engine starts."); return; }
+  const r = recs[hist.length-1];
+  const mine = r ? r.by==="you" : m.color===gameColor;
+  el.className = "lastmove " + (mine ? "you" : "engine");
+  add("lm-who", mine ? "You" : "Engine");
+  const main = add("lm-main", "");
+  add("", PIECE_NAME[m.piece].replace(/^./, c=>c.toUpperCase()), main);
+  add("lm-sq", m.from, main); add("lm-arrow", "→", main); add("lm-sq", m.to, main);
+  const extra = [];
+  if (m.flags.includes("k") || m.flags.includes("q")){
+    const rank = m.from[1], rookFrom = (m.flags.includes("k")?"h":"a")+rank, rookTo = (m.flags.includes("k")?"f":"d")+rank;
+    extra.push(`castles, rook ${rookFrom} → ${rookTo}`);
+  }
+  if (m.captured) extra.push(`takes ${PIECE_NAME[m.captured]}${m.flags.includes("e") ? " en passant" : ""}`);
+  if (m.promotion) extra.push(`promotes to ${PIECE_NAME[m.promotion]}`);
+  if (m.san.endsWith("#")) extra.push("checkmate"); else if (m.san.endsWith("+")) extra.push("check");
+  if (extra.length) add("lm-extra", extra.join(", "), main);
+  const san = add("lm-san", m.san);
+  if (r && r.quality && ANN[r.quality]){ const a=add("ann q-"+r.quality, ANN[r.quality], san); }
+}
+$("board").addEventListener("click", e=>{
+  const s = e.target.closest(".sq"); if (!s) return;
+  const sqn = s.dataset.sq;
+  if (!userTurn() || thinking || game.game_over()) return;
+  const p = game.get(sqn);
+  if (selected){
+    const mv = game.moves({square:selected, verbose:true}).find(m=>m.to===sqn && (!m.promotion || m.promotion==="q"));
+    if (mv){ selected=null; userMove(mv, "tap"); return; }
+  }
+  selected = (p && p.color===gameColor && selected!==sqn) ? sqn : null;
+  renderBoard();
+});
+function renderEval(a){
+  if (!a) return; lastEval = a;
+  $("evalFill").style.height = a.wpW.toFixed(1)+"%";
+  $("evalText").textContent = a.mateW!=null ? (a.mateW>0?"+":"-")+"M"+Math.abs(a.mateW) : ((a.rawCpW!=null?a.rawCpW:a.cpW)/100>=0?"+":"") + ((a.rawCpW!=null?a.rawCpW:a.cpW)/100).toFixed(1);
+  const you = Math.round(gameColor==="w" ? a.wpW : 100-a.wpW);
+  $("wpText").textContent = `Your winning chances ${you}%`;
+}
+function renderSheet(){
+  const tb = $("sheetBody"); tb.textContent = "";
+  if (!recs.length){ const tr=document.createElement("tr"); const td=document.createElement("td"); td.colSpan=3; td.className="empty"; td.textContent="Moves appear here as you play. Your moves get an engine verdict."; tr.append(td); tb.append(tr); return; }
+  for (let i=0;i<recs.length;i+=2){
+    const tr = document.createElement("tr");
+    const n = document.createElement("td"); n.className="n"; n.textContent = (i/2+1)+"."; tr.append(n);
+    for (const r of [recs[i], recs[i+1]]){
+      const td = document.createElement("td");
+      if (r){ td.textContent = r.san; if (r.by==="you" && r.quality){ td.className = "q-"+r.quality; if (ANN[r.quality]){ const a=document.createElement("span"); a.className="ann"; a.textContent=ANN[r.quality]; td.append(a); } td.title = r.quality; } }
+      tr.append(td);
+    }
+    tb.append(tr);
+  }
+  const w = tb.closest(".sheetwrap"); w.scrollTop = w.scrollHeight;
+  renderLastMove();
+}
+function feedAdd(kind, text, isThinking){
+  const el = document.createElement("div"); el.className = "entry "+kind+(isThinking?" thinking":"");
+  const who = document.createElement("div"); who.className="who"; who.textContent = {you:"You", engine:"Engine", coach:"Coach", system:"Note"}[kind] || kind;
+  const body = document.createElement("div"); body.className="body"; body.textContent = text;
+  el.append(who, body); const f = $("feed"); f.prepend(el);
+  while (f.children.length>80) f.lastElementChild.remove();
+  return {el, body};
+}
+function feedMove(kind, san, extraText){
+  const e = feedAdd(kind, ""); const s=document.createElement("span"); s.className="san"; s.textContent=san; e.body.append(s);
+  if (extraText) e.body.append(" " + extraText);
+  return e;
+}
+function setStatus(main, sub){ $("statusText").textContent = main; if (sub!==undefined) $("statusSub").textContent = sub; }
+function showChoices(list, why){
+  const c = $("choices"); c.textContent = ""; c.hidden = !list.length;
+  pending = list.length ? {type:"choose", options:list} : null;
+  for (const m of list){ const b=document.createElement("button"); b.className="btn"; b.type="button"; b.textContent = m.san; b.onclick=()=>{ clearChoices(); userMove(m,"tap"); }; c.append(b); }
+  if (list.length){ const words = list.map(m=>speakSan(m.san)).join(", or "); const msg = (why? why+" ":"") + "Which one: " + words + "?"; feedAdd("system", msg); speak(msg); }
+}
+function clearChoices(){ $("choices").hidden = true; $("choices").textContent=""; if (pending && pending.type==="choose") pending=null; }
+function idleStatus(){
+  if (game.game_over()) return;
+  if (thinking) setStatus("Engine is thinking…");
+  else if (userTurn()) setStatus("Your move", "Say or type it, or tap the pieces.");
+  else setStatus("Waiting for the engine…");
+}
+
+/* ---------- game flow ---------- */
+async function userMove(m, via){
+  if (!userTurn() || thinking) return;
+  clearChoices(); selected = null; pending = null;
+  const g = gen;
+  const fenBefore = game.fen();
+  const preP = analysisFor(fenBefore);
+  const mv = game.move({from:m.from, to:m.to, promotion:m.promotion||"q"});
+  if (!mv) return;
+  const r = {by:"you", san:mv.san, uci:mv.from+mv.to+(mv.promotion||""), color:mv.color};
+  recs.push(r); store(); renderBoard(); renderSheet();
+  const entry = feedMove("you", mv.san);
+  if (via==="voice" || via==="text") speak(speakSan(mv.san)+".");
+  const fenAfter = game.fen();
+  const postP = analysisFor(fenAfter);
+  if (game.game_over()){ finishGame(); }
+  else replyPromise = engineReply();
+  let pre, post;
+  try{ [pre, post] = await Promise.all([preP, postP]); }catch(e){ return; }
+  if (g!==gen) return;
+  const c = classify(pre, post, r.uci);
+  Object.assign(r, {quality:c.q, wpBefore:c.before, wpAfter:c.after,
+    bestSan: pre.bestmove ? uciLine(fenBefore,[pre.bestmove],1)[0] : null, bestLine: uciLine(fenBefore, pre.pv, 5),
+    replySan: post.bestmove ? uciLine(fenAfter,[post.bestmove],1)[0] : null, replyLine: uciLine(fenAfter, post.pv, 4)});
+  store(); renderSheet();
+  if (ANN[c.q]){ const a=document.createElement("span"); a.className="ann q-"+c.q; a.textContent=ANN[c.q]; entry.body.firstChild.after(a); entry.body.append(" " + c.q); }
+  else if (c.q==="best"){ entry.body.append(" best move"); }
+  if (!game.history().length || game.game_over()) return;
+  sinceCoach++;
+  const mine = recs.filter(x=>x.by==="you" && x.quality);
+  if (settings.alert && (c.q==="mistake" || c.q==="blunder")){ sinceCoach = 0; coach("alert", {rec:r, recs:[r], after: replyPromise}); }
+  else if (sinceCoach >= settings.freq){ sinceCoach = 0; coach("periodic", {recs: mine.slice(-settings.freq), after: replyPromise}); }
+}
+async function engineReply(){
+  const g = gen; thinking = true; idleStatus();
+  const fen = game.fen(); const lv = LEVELS[settings.opp] || LEVELS[1200];
+  const t0 = performance.now();
+  if (!engineOk){ thinking=false; setStatus("Engine not loaded", "Moves still record, but there's no opponent or analysis."); return; }
+  let res;
+  try{ res = await player.search(fen, {depth:lv.depth, mt:lv.mt, skill:lv.skill}); }catch(e){ thinking=false; return; }
+  const wait = 600 - (performance.now()-t0); if (wait>0) await sleep(wait);
+  if (g!==gen || game.fen()!==fen){ return; }
+  const mv = applyUci(res.bestmove);
+  thinking = false;
+  if (!mv){ idleStatus(); return; }
+  recs.push({by:"engine", san:mv.san, uci:res.bestmove, color:mv.color});
+  store(); renderBoard(); renderSheet();
+  const words = speakSan(mv.san);
+  feedMove("engine", mv.san, "— make it on your board");
+  setStatus(`Engine plays ${mv.san}`, `Move it on your board: ${words}. Then it's your move.`);
+  speak(`I play ${words}.`);
+  if (game.game_over()){ finishGame(); return; }
+  analysisFor(game.fen()).then(a=>{ if(g===gen) renderEval(a); }).catch(()=>{});
+}
+function finishGame(){
+  let msg;
+  if (game.in_checkmate()) msg = (game.turn()===gameColor) ? "Checkmate. The engine wins this one." : "Checkmate! You win.";
+  else if (game.in_stalemate()) msg = "Stalemate. It's a draw.";
+  else if (game.in_threefold_repetition()) msg = "Draw by repetition.";
+  else if (game.insufficient_material()) msg = "Draw, not enough material to mate.";
+  else msg = "Draw.";
+  setStatus(msg, "Ask for a review, or start a new game.");
+  feedAdd("system", msg); speak(msg);
+  const mine = recs.filter(x=>x.by==="you" && x.quality);
+  setTimeout(()=>coach("review", {recs: mine}), 400);
+}
+function undo(){
+  if (thinking){ speak("Hang on, the engine is still thinking."); return; }
+  if (!recs.length){ speak("There's nothing to take back."); return; }
+  gen++; hush();
+  // take back to the user's last move
+  let n = 0;
+  while (recs.length){ const r = recs.pop(); game.undo(); n++; if (r.by==="you") break; }
+  selected = null; clearChoices(); store(); renderBoard(); renderSheet();
+  const msg = n>1 ? "Taken back. Undo both moves on your board." : "Taken back. Undo it on your board.";
+  feedAdd("system", msg); speak(msg + " Your move.");
+  idleStatus();
+  if (!userTurn()) replyPromise = engineReply();
+  else analysisFor(game.fen()).then(renderEval).catch(()=>{});
+}
+async function newGame(){
+  gen++; hush(); thinking=false; pending=null; selected=null; clearChoices();
+  game.reset(); recs=[]; sinceCoach=0; qa.length=0; gameColor = settings.color; analysisCache.clear();
+  store(); renderBoard(); renderSheet(); renderEval({wpW:50,cpW:0,rawCpW:0,mateW:null});
+  if (engineOk){ player.newGame(); analyst.newGame(); }
+  const msg = `New game. You have the ${gameColor==="w"?"white":"black"} pieces.` + (gameColor==="w" ? " Your move." : " I'll start.");
+  feedAdd("system", msg); speak(msg);
+  if (gameColor==="b") replyPromise = engineReply(); else { idleStatus(); analysisFor(game.fen()).then(renderEval).catch(()=>{}); }
+}
+async function hint(){
+  if (!userTurn() || game.game_over()){ speak("Wait for your turn for a hint."); return; }
+  let a; try{ a = await analysisFor(game.fen()); }catch(e){ speak("The engine isn't ready yet."); return; }
+  const bestSan = a.bestmove ? uciLine(game.fen(),[a.bestmove],1)[0] : null;
+  const bestPiece = a.bestmove ? (game.get(a.bestmove.slice(0,2))||{}).type : null;
+  coach("hint", {bestSan, bestPiece, bestLine: uciLine(game.fen(), a.pv, 4)});
+}
+function review(){ coach("review", {recs: recs.filter(x=>x.by==="you" && x.quality)}); }
+function readBoard(){
+  const b = boardText();
+  const msg = `White: ${b.white}. Black: ${b.black}.`;
+  feedAdd("system", msg); speak(msg);
+}
+
+/* ---------- input handling ---------- */
+const QWORDS = /^(what|why|how|is|was|should|shouldnt|can|could|would|where|when|which|do|does|did|explain|tell|coach|question|whats|isnt)\b/;
+function handleInput(text, alts=[], via="text"){
+  const raw = String(text||"").trim(); if (!raw) return;
+  const t = raw.toLowerCase().replace(/[.!,]/g,"").trim();
+  // pending yes/no
+  if (pending && pending.type==="confirm"){
+    if (/^(yes|yeah|yep|yup|sure|correct|confirm|ok|okay|do it|play it)\b/.test(t)){ const p=pending; pending=null; if (p.action==="move") userMove(p.move, "voice"); else if (p.action==="new") newGame(); return; }
+    if (/^(no|nope|cancel|never mind|nevermind)\b/.test(t)){ pending=null; speak("Okay."); return; }
+  }
+  // commands
+  if (/^(undo|take ?back|takeback|take it back|go back)/.test(t)) return undo();
+  if (/(new game|restart|start over|start again)/.test(t)){ pending={type:"confirm", action:"new"}; speak("Start a new game? Say yes to confirm."); feedAdd("system","Start a new game? Say or type yes."); return; }
+  if (/^(stop|quiet|shush|hush|shut up|enough)\b/.test(t)) return hush();
+  if (/(repeat|say (that|it) again|pardon|come again|what did you say)/.test(t)){ speak(lastSpoken || "Nothing to repeat yet."); return; }
+  if (/(read|list|where are|check).*(board|pieces|position)|board check|sync/.test(t)) return readBoard();
+  if (/^(hint|help me|give me a hint|what should i play|suggest)/.test(t)) return hint();
+  if (/(how am i doing|review|analy[sz]e|assess|evaluate|how did i do)/.test(t)) return review();
+  if (QWORDS.test(t) || raw.endsWith("?")){ feedAdd("you", raw); return coach("question", {question: raw, recs: recs.filter(x=>x.by==="you"&&x.quality).slice(-4)}); }
+  // choosing between ambiguous moves
+  if (pending && pending.type==="choose"){
+    const ps = parseSpoken(raw);
+    const pick = pending.options.filter(m=>ps.squares.includes(m.from) || (ps.mover && m.piece===ps.mover && pending.options.filter(o=>o.piece===ps.mover).length===1));
+    if (pick.length===1){ userMove(pick[0], via); return; }
+  }
+  // moves
+  if (!userTurn()){ speak(thinking ? "Hang on, the engine is thinking." : "It's not your move yet."); return; }
+  if (game.game_over()){ speak("The game is over. Say new game to play again."); return; }
+  let best = null;
+  for (const cand of [raw, ...alts]){
+    const res = resolveMove(game, cand);
+    if (res.move){ best = res; break; }
+    if (!best || (res.choices && !best.choices) || (res.suggest && !best.choices && !best.suggest)) best = res;
+  }
+  if (best.move) return userMove(best.move, via);
+  if (best.choices) return showChoices(best.choices, best.why);
+  if (best.suggest){ pending = {type:"confirm", action:"move", move:best.suggest}; const msg = `${best.why} Did you mean ${speakSan(best.suggest.san)}?`; feedAdd("system", msg + " Say yes, or tap it."); showSuggest(best.suggest); speak(msg); return; }
+  const msg = best.error ? best.error + " Try again." : `I didn't catch a move in "${raw}". Try something like "knight to f3".`;
+  feedAdd("system", msg); speak(best.error ? best.error + " Try again." : "Sorry, I didn't catch a move. Try again.");
+}
+function showSuggest(m){ const c=$("choices"); c.textContent=""; c.hidden=false; const b=document.createElement("button"); b.className="btn"; b.type="button"; b.textContent="Play "+m.san; b.onclick=()=>{ pending=null; c.hidden=true; userMove(m,"tap"); }; c.append(b); }
+
+/* ---------- wiring ---------- */
+$("sayForm").addEventListener("submit", e=>{ e.preventDefault(); const v=$("sayInput").value; $("sayInput").value=""; handleInput(v, [], "text"); });
+document.querySelectorAll("[data-cmd]").forEach(b=>b.addEventListener("click", ()=>{
+  ({hint, review, undo, readboard:readBoard, repeat:()=>speak(lastSpoken||"Nothing to repeat yet."), hush})[b.dataset.cmd]();
+}));
+$("micBtn").addEventListener("click", ()=>{ if (wantListen) stopListening(); else startListening(); });
+$("newBtn").addEventListener("click", ()=>{
+  if (recs.length && !(pending && pending.type==="confirm" && pending.action==="new")){ pending={type:"confirm",action:"new"}; $("newBtn").textContent="Tap again to confirm"; setTimeout(()=>{ $("newBtn").textContent="New game"; if(pending&&pending.action==="new") pending=null; }, 3000); return; }
+  $("newBtn").textContent="New game"; newGame();
+});
+function toggleSettings(open){ $("settings").hidden = !open; $("settingsBtn").setAttribute("aria-expanded", String(open)); }
+$("settingsBtn").addEventListener("click", ()=>toggleSettings($("settings").hidden));
+$("closeSettings").addEventListener("click", ()=>toggleSettings(false));
+$("applyNew").addEventListener("click", ()=>{ toggleSettings(false); newGame(); });
+$("colorSeg").addEventListener("click", e=>{ const b=e.target.closest("button"); if(!b) return; settings.color=b.dataset.c; syncSettingsUI(); store(); });
+$("oppSel").addEventListener("change", e=>{ settings.opp=+e.target.value; store(); });
+$("ratingIn").addEventListener("change", e=>{ settings.rating=Math.max(400,Math.min(2800,+e.target.value||1200)); store(); });
+$("freqSel").addEventListener("change", e=>{ settings.freq=+e.target.value; store(); });
+$("alertChk").addEventListener("change", e=>{ settings.alert=e.target.checked; store(); });
+$("speakChk").addEventListener("change", e=>{ settings.speak=e.target.checked; if(!settings.speak) hush(); store(); });
+$("voiceSel").addEventListener("change", e=>{ settings.voice=e.target.value; store(); speak("This is my voice."); });
+$("rateIn").addEventListener("change", e=>{ settings.rate=+e.target.value; store(); });
+$("langSel").addEventListener("change", e=>{ settings.lang=e.target.value; if(rec) rec.lang=settings.lang; store(); });
+$("keyIn").addEventListener("change", e=>{ settings.key=e.target.value.trim(); store(); updateCoachPill(); });
+function syncSettingsUI(){
+  document.querySelectorAll("#colorSeg button").forEach(b=>b.setAttribute("aria-pressed", String(b.dataset.c===settings.color)));
+  $("oppSel").value=String(settings.opp); $("ratingIn").value=settings.rating; $("freqSel").value=String(settings.freq);
+  $("alertChk").checked=settings.alert; $("speakChk").checked=settings.speak; $("rateIn").value=settings.rate; $("langSel").value=settings.lang; $("keyIn").value=settings.key||"";
+  if (voices.some(v=>v.name===settings.voice)) $("voiceSel").value=settings.voice;
+}
+let wake = null;
+async function keepAwake(){ try{ if (navigator.wakeLock && !wake){ wake = await navigator.wakeLock.request("screen"); wake.addEventListener("release", ()=>{ wake=null; }); } }catch(e){} }
+document.addEventListener("pointerdown", function prime(){ keepAwake(); try{ if("speechSynthesis" in window){ const u=new SpeechSynthesisUtterance(" "); u.volume=0; speechSynthesis.speak(u);} }catch(e){} document.removeEventListener("pointerdown", prime); });
+document.addEventListener("visibilitychange", ()=>{ if (document.visibilityState==="visible" && wake===null && $("app").dataset.started) keepAwake(); });
+
+/* ---------- boot ---------- */
+(async function boot(){
+  const had = restore(); syncSettingsUI();
+  renderBoard(); renderSheet(); renderEval({wpW:50,cpW:0,rawCpW:0,mateW:null});
+  feedAdd("system", "Play on your physical board and tell me each move. I'll answer with mine, and Stockfish judges every move you make. Say \"hint\", \"take back\", \"read the board\", or ask a question any time.");
+  initClaude();
+  setStatus("Loading the engine…", "Stockfish takes a few seconds to start.");
+  try{ await Promise.all([player.init(), analyst.init()]); engineOk = true;
+    const p=$("enginePill"); p.className="pill ok"; p.lastElementChild.textContent="Stockfish ready"; }
+  catch(e){ const p=$("enginePill"); p.className="pill bad"; p.lastElementChild.textContent="Engine failed to load";
+    setStatus("The engine didn't load", "Check your connection and reload. Moves can still be entered."); return; }
+  $("app").dataset.started = "1";
+  if (game.game_over()){ finishGame(); return; }
+  if (had && recs.length) feedAdd("system", `Picked up your game in progress after ${game.history().length} moves. Say "read the board" to check your pieces match.`);
+  if (!userTurn()) replyPromise = engineReply();
+  else { idleStatus(); analysisFor(game.fen()).then(renderEval).catch(()=>{}); }
+})();
+</script>
+
+</body></html>
