@@ -90,7 +90,8 @@ button,input,select{font:inherit;color:inherit}
 
 .say{grid-area:say;display:grid;gap:10px;min-width:0}
 .sayrow{display:flex;gap:8px;align-items:stretch}
-.mic{flex:none;width:52px;border-radius:10px;border:1px solid var(--line);background:var(--surface);cursor:pointer;display:grid;place-items:center}
+.mic{flex:none;min-width:72px;padding:6px 8px;border-radius:10px;border:1px solid var(--line);background:var(--surface);cursor:pointer;display:grid;place-items:center;gap:2px}
+.miclab{font-family:var(--f-display);font-size:11.5px;letter-spacing:.04em;line-height:1.1;white-space:nowrap}
 .mic svg{width:22px;height:22px}
 .mic.on{background:var(--q-blunder);border-color:var(--q-blunder);color:#fff;animation:pulse 1.6s ease-in-out infinite}
 @keyframes pulse{50%{box-shadow:0 0 0 6px color-mix(in srgb,var(--q-blunder) 25%,transparent)}}
@@ -173,6 +174,9 @@ tr:nth-child(even) td{background:color-mix(in srgb,var(--sunk) 45%,transparent)}
       <select id="voiceSel" aria-label="Voice"><option value="">Default voice</option></select>
       <label for="rateIn" class="lab" style="margin-top:4px">Speaking speed</label>
       <input type="range" id="rateIn" min="0.8" max="1.4" step="0.05" value="1"></div>
+    <div class="field"><label for="micModeSel">Microphone</label>
+      <select id="micModeSel"><option value="auto">Automatic (tap to talk on phones)</option><option value="tap">Tap to talk, one move per tap</option><option value="always">Always listening</option></select>
+      <small>Tap to talk is the reliable choice on phones.</small></div>
     <div class="field"><label for="langSel">Listening accent</label>
       <select id="langSel"><option value="en-AU">English (Australia)</option><option value="en-GB">English (UK)</option><option value="en-US">English (US)</option></select>
       <small>Used by the hands-free microphone.</small></div>
@@ -203,9 +207,9 @@ tr:nth-child(even) td{background:color-mix(in srgb,var(--sunk) 45%,transparent)}
 
   <section class="say" aria-label="Talk to the coach">
     <form class="sayrow" id="sayForm" autocomplete="off">
-      <button type="button" class="mic" id="micBtn" aria-pressed="false" title="Hands-free listening">
+      <button type="button" class="mic" id="micBtn" aria-pressed="false" title="Microphone">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><path d="M12 17v5"/></svg>
-        <span class="sr" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Hands-free listening</span>
+        <span class="miclab" id="micLab">Listen</span>
       </button>
       <input id="sayInput" type="text" enterkeyhint="send" placeholder="Your move or a question…" aria-label="Your move or a question">
       <button class="btn primary" type="submit">Send</button>
@@ -246,7 +250,7 @@ const STORE = "boardside-coach.v1";
 
 /*PARSER-START*/
 const P_WORDS = {knight:"n",knights:"n",night:"n",nights:"n",nite:"n",horse:"n",bishop:"b",bishops:"b",rook:"r",rooks:"r",rock:"r",brook:"r",ruke:"r",queen:"q",queens:"q",king:"k",kings:"k",pawn:"p",pawns:"p",pond:"p",prawn:"p",pon:"p",palm:"p",porn:"p"};
-const F_WORDS = {a:"a",ay:"a",eh:"a",hey:"a",alpha:"a",b:"b",be:"b",bee:"b",bravo:"b",c:"c",see:"c",sea:"c",si:"c",charlie:"c",d:"d",dee:"d",delta:"d",the:"d",e:"e",ee:"e",echo:"e",f:"f",ef:"f",eff:"f",foxtrot:"f",g:"g",gee:"g",ji:"g",golf:"g",h:"h",aitch:"h",age:"h",hotel:"h",each:"h"};
+const F_WORDS = {he:"e",a:"a",ay:"a",eh:"a",hey:"a",alpha:"a",b:"b",be:"b",bee:"b",bravo:"b",c:"c",see:"c",sea:"c",si:"c",charlie:"c",d:"d",dee:"d",delta:"d",the:"d",e:"e",ee:"e",echo:"e",f:"f",ef:"f",eff:"f",foxtrot:"f",g:"g",gee:"g",ji:"g",golf:"g",h:"h",aitch:"h",age:"h",hotel:"h",each:"h"};
 const N_WORDS = {"1":"1","2":"2","3":"3","4":"4","5":"5","6":"6","7":"7","8":"8",one:"1",won:"1",two:"2",too:"2",to:"2",three:"3",tree:"3",free:"3",four:"4",for:"4",fore:"4",five:"5",six:"6",sex:"6",seven:"7",eight:"8",ate:"8"};
 const WHOLE = {before:"b4",befour:"b4",seafor:"c4",defor:"d4",ate:null};
 const CAPTURE = new Set(["takes","take","took","taking","captures","capture","captured","x","eats","grabs","by"]);
@@ -365,7 +369,7 @@ let gen = 0, thinking = false, pending = null, selected = null, lastSpoken = "",
 let lastEval = null;
 const analysisCache = new Map();
 const qa = [];            // recent question/answer turns
-const settings = {color:"w", opp:1200, rating:1200, freq:3, alert:true, speak:true, voice:"", rate:1, lang:"en-AU", key:""};
+const settings = {color:"w", opp:1200, rating:1200, freq:3, alert:true, speak:true, voice:"", rate:1, lang:"en-AU", key:"", micMode:"auto"};
 let gameColor = "w";      // colour for the game in progress
 
 const $ = id => document.getElementById(id);
@@ -454,11 +458,13 @@ function classify(pre, post, uci){
 
 /* ---------- speech out ---------- */
 const sq = []; let speaking = false, voices = [];
+const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+const normLang = l => String(l||"").replace("_","-");
 function loadVoices(){
-  try{ voices = (speechSynthesis.getVoices()||[]).filter(v=>/^en/i.test(v.lang)); }catch(e){ voices = []; }
+  try{ voices = (speechSynthesis.getVoices()||[]).filter(v=>/^en/i.test(normLang(v.lang))); }catch(e){ voices = []; }
   const sel = $("voiceSel"), cur = settings.voice; sel.textContent = "";
   const d = document.createElement("option"); d.value=""; d.textContent="Default voice"; sel.append(d);
-  for (const v of voices){ const o=document.createElement("option"); o.value=v.name; o.textContent=`${v.name} (${v.lang})`; sel.append(o); }
+  for (const v of voices){ const o=document.createElement("option"); o.value=v.name; o.textContent=`${v.name} (${normLang(v.lang)})`; sel.append(o); }
   sel.value = voices.some(v=>v.name===cur) ? cur : "";
 }
 if ("speechSynthesis" in window){ loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
@@ -472,51 +478,83 @@ function pump(){
   if (speaking || !sq.length) return;
   const item = sq.shift(); if (!item.text){ item.res && item.res(); pump(); return; }
   speaking = true; muteUntil = Infinity;
-  const u = new SpeechSynthesisUtterance(item.text);
-  const v = voices.find(v=>v.name===settings.voice) || voices.find(v=>v.lang==="en-AU") || voices.find(v=>v.lang==="en-GB") || null;
-  if (v) u.voice = v; u.lang = v ? v.lang : "en-AU"; u.rate = settings.rate;
-  let done = false; const fin = ()=>{ if(done) return; done=true; speaking=false; if(!sq.length) muteUntil = Date.now()+700; item.res && item.res(); pump(); };
-  u.onend = fin; u.onerror = fin; setTimeout(fin, 4000 + item.text.length*120);
-  speechSynthesis.speak(u);
+  const go = () => {
+    const u = new SpeechSynthesisUtterance(item.text);
+    let v = voices.find(v=>v.name===settings.voice) || null;
+    if (!v && !isMobile) v = voices.find(v=>normLang(v.lang)==="en-AU") || voices.find(v=>normLang(v.lang)==="en-GB") || null;
+    if (v){ u.voice = v; u.lang = normLang(v.lang); } else u.lang = "en-AU";
+    u.rate = settings.rate; u.volume = 1;
+    let done = false; const fin = ()=>{ if(done) return; done=true; speaking=false; item.res && item.res(); if(!sq.length){ muteUntil = Date.now()+400; afterSpeech(); } pump(); };
+    u.onend = fin; u.onerror = fin; setTimeout(fin, 4000 + item.text.length*120);
+    try{ speechSynthesis.resume(); }catch(e){}
+    speechSynthesis.speak(u);
+  };
+  // Phones won't play speech while the microphone is open, so close it first.
+  if (srActive && pauseMicForSpeech()){ try{ rec.abort(); }catch(e){} setTimeout(go, 300); } else go();
 }
-function hush(){ sq.length = 0; try{ speechSynthesis.cancel(); }catch(e){} speaking=false; muteUntil = 0; }
+function hush(){ sq.length = 0; try{ speechSynthesis.cancel(); }catch(e){} speaking=false; muteUntil = 0; afterSpeech(); }
 
 /* ---------- speech in ---------- */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let rec = null, wantListen = false, srActive = false, muteUntil = 0;
-// The mic stays open the whole time; while the coach is talking (and for a moment after) we simply ignore what it hears.
+let rec = null, wantListen = false, srActive = false, muteUntil = 0, onceMode = false;
 const heardWhileTalking = () => speaking || Date.now() < muteUntil;
-function setMic(on){ $("micBtn").classList.toggle("on", on); $("micBtn").setAttribute("aria-pressed", String(on)); }
+// Tap to talk: one phrase per tap (reliable on phones). Always listening: the mic stays on all game (laptops).
+function micMode(){ return (settings.micMode==="tap" || settings.micMode==="always") ? settings.micMode : (isMobile ? "tap" : "always"); }
+// Over https or localhost the browser remembers mic permission, so closing the mic while the coach talks costs nothing.
+// A file opened from disk re-prompts on every restart, so there the mic stays open and we ignore what it hears instead.
+function pauseMicForSpeech(){ return location.protocol !== "file:"; }
+function afterSpeech(){ if (wantListen && micMode()==="always" && rec && !srActive) setTimeout(()=>{ if (wantListen && !srActive && !speaking) tryStart(); }, 250); }
+function setMic(on){
+  $("micBtn").classList.toggle("on", on); $("micBtn").setAttribute("aria-pressed", String(on));
+  $("micLab").textContent = on ? "Listening" : (micMode()==="tap" ? "Tap to talk" : "Listen");
+}
 function micBlocked(reason){
-  wantListen = false; setMic(false);
+  wantListen = false; onceMode = false; setMic(false);
   const n = $("micNote"); n.hidden = false;
-  n.textContent = reason || "The microphone is blocked in this view. Tap the move box and use your keyboard's dictation mic instead, or open the standalone copy of this page in Chrome for hands-free listening.";
+  n.textContent = reason || "The microphone is blocked in this view. Tap the move box and use your keyboard's dictation mic instead, or open the coach's website in Chrome for hands-free listening.";
   $("sayInput").focus();
 }
+function ensureRec(){
+  if (rec) return rec;
+  rec = new SR(); rec.interimResults = true; rec.maxAlternatives = 3;
+  rec.onresult = e => {
+    for (let i=e.resultIndex;i<e.results.length;i++){
+      const r = e.results[i];
+      if (heardWhileTalking()){ $("interim").textContent = ""; continue; }
+      if (r.isFinal){ const alts = Array.from(r).map(a=>a.transcript.trim()).filter(Boolean); if(!alts.length) continue; $("interim").textContent = "Heard: “" + alts[0] + "”"; handleInput(alts[0], alts.slice(1), "voice"); }
+      else $("interim").textContent = "Hearing: " + r[0].transcript;
+    }
+  };
+  rec.onerror = e => {
+    if (e.error==="not-allowed" || e.error==="service-not-allowed" || e.error==="audio-capture") micBlocked();
+    else if (onceMode && e.error==="no-speech") $("interim").textContent = "I didn't hear anything. Tap the mic and try again.";
+  };
+  rec.onend = () => {
+    srActive = false;
+    if (onceMode){ onceMode = false; setMic(false); return; }
+    const blocked = () => speaking && pauseMicForSpeech();
+    if (wantListen && !blocked()) setTimeout(()=>{ if (wantListen && !srActive && !blocked()) tryStart(); }, 250);
+  };
+  return rec;
+}
+function noSR(){ micBlocked("This browser has no built-in speech recognition. Use your keyboard's dictation mic in the move box, or open the page in Chrome."); }
+function listenOnce(){
+  if (!SR) return noSR();
+  if (srActive){ try{ rec.stop(); }catch(e){} return; }   // second tap stops early
+  hush(); ensureRec(); wantListen = false; onceMode = true; rec.continuous = false; rec.lang = settings.lang;
+  setMic(true); $("interim").textContent = "Listening… say your move.";
+  setTimeout(tryStart, 150);
+}
 function startListening(){
-  if (!SR){ micBlocked("This browser has no built-in speech recognition. Use your keyboard's dictation mic in the move box, or open the page in Chrome."); return; }
-  wantListen = true; setMic(true);
-  if (!rec){
-    rec = new SR(); rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 3;
-    rec.onresult = e => {
-      for (let i=e.resultIndex;i<e.results.length;i++){
-        const r = e.results[i];
-        if (heardWhileTalking()){ $("interim").textContent = ""; continue; }
-        if (r.isFinal){ $("interim").textContent = ""; const alts = Array.from(r).map(a=>a.transcript); handleInput(alts[0], alts.slice(1), "voice"); }
-        else $("interim").textContent = "Hearing: " + r[0].transcript;
-      }
-    };
-    rec.onerror = e => { if (e.error==="not-allowed" || e.error==="service-not-allowed" || e.error==="audio-capture") micBlocked(); };
-    rec.onend = () => { srActive = false; if (wantListen) setTimeout(()=>{ if(wantListen && !srActive) tryStart(); }, 250); };
-  }
-  rec.lang = settings.lang; tryStart();
+  if (!SR) return noSR();
+  ensureRec(); onceMode = false; wantListen = true; rec.continuous = true; rec.lang = settings.lang; setMic(true); tryStart();
   if (location.protocol === "file:"){
     const n = $("micNote"); n.hidden = false;
-    n.textContent = "Chrome may still ask for the mic now and then on a file opened straight from your computer. Choose “Allow while visiting the site”. For no prompts at all, open it with the “Start Board-Side Coach” launcher instead of double-clicking this file.";
+    n.textContent = "Chrome may still ask for the mic now and then on a file opened straight from your computer. Choose “Allow while visiting the site”, or use the coach's website instead.";
   }
 }
 function tryStart(){ try{ rec.start(); srActive = true; }catch(e){} }
-function stopListening(){ wantListen = false; setMic(false); try{ rec && rec.stop(); }catch(e){} }
+function stopListening(){ wantListen = false; onceMode = false; setMic(false); try{ rec && rec.stop(); }catch(e){} }
 
 /* ---------- Claude ---------- */
 let sampleFn = null, aiOff = false;
@@ -877,7 +915,7 @@ function handleInput(text, alts=[], via="text"){
   if (best.choices) return showChoices(best.choices, best.why);
   if (best.suggest){ pending = {type:"confirm", action:"move", move:best.suggest}; const msg = `${best.why} Did you mean ${speakSan(best.suggest.san)}?`; feedAdd("system", msg + " Say yes, or tap it."); showSuggest(best.suggest); speak(msg); return; }
   const msg = best.error ? best.error + " Try again." : `I didn't catch a move in "${raw}". Try something like "knight to f3".`;
-  feedAdd("system", msg); speak(best.error ? best.error + " Try again." : "Sorry, I didn't catch a move. Try again.");
+  feedAdd("system", (via==="voice" && best.error ? `Heard “${raw}”. ` : "") + msg); speak(best.error ? best.error + " Try again." : "Sorry, I didn't catch a move. Try again.");
 }
 function showSuggest(m){ const c=$("choices"); c.textContent=""; c.hidden=false; const b=document.createElement("button"); b.className="btn"; b.type="button"; b.textContent="Play "+m.san; b.onclick=()=>{ pending=null; c.hidden=true; userMove(m,"tap"); }; c.append(b); }
 
@@ -886,7 +924,10 @@ $("sayForm").addEventListener("submit", e=>{ e.preventDefault(); const v=$("sayI
 document.querySelectorAll("[data-cmd]").forEach(b=>b.addEventListener("click", ()=>{
   ({hint, review, undo, readboard:readBoard, repeat:()=>speak(lastSpoken||"Nothing to repeat yet."), hush})[b.dataset.cmd]();
 }));
-$("micBtn").addEventListener("click", ()=>{ if (wantListen) stopListening(); else startListening(); });
+$("micBtn").addEventListener("click", ()=>{
+  if (micMode()==="tap") listenOnce();
+  else if (wantListen) stopListening(); else startListening();
+});
 $("newBtn").addEventListener("click", ()=>{
   if (recs.length && !(pending && pending.type==="confirm" && pending.action==="new")){ pending={type:"confirm",action:"new"}; $("newBtn").textContent="Tap again to confirm"; setTimeout(()=>{ $("newBtn").textContent="New game"; if(pending&&pending.action==="new") pending=null; }, 3000); return; }
   $("newBtn").textContent="New game"; newGame();
@@ -903,12 +944,13 @@ $("alertChk").addEventListener("change", e=>{ settings.alert=e.target.checked; s
 $("speakChk").addEventListener("change", e=>{ settings.speak=e.target.checked; if(!settings.speak) hush(); store(); });
 $("voiceSel").addEventListener("change", e=>{ settings.voice=e.target.value; store(); speak("This is my voice."); });
 $("rateIn").addEventListener("change", e=>{ settings.rate=+e.target.value; store(); });
+$("micModeSel").addEventListener("change", e=>{ stopListening(); settings.micMode=e.target.value; setMic(false); store(); });
 $("langSel").addEventListener("change", e=>{ settings.lang=e.target.value; if(rec) rec.lang=settings.lang; store(); });
 $("keyIn").addEventListener("change", e=>{ settings.key=e.target.value.trim(); store(); updateCoachPill(); });
 function syncSettingsUI(){
   document.querySelectorAll("#colorSeg button").forEach(b=>b.setAttribute("aria-pressed", String(b.dataset.c===settings.color)));
   $("oppSel").value=String(settings.opp); $("ratingIn").value=settings.rating; $("freqSel").value=String(settings.freq);
-  $("alertChk").checked=settings.alert; $("speakChk").checked=settings.speak; $("rateIn").value=settings.rate; $("langSel").value=settings.lang; $("keyIn").value=settings.key||"";
+  $("alertChk").checked=settings.alert; $("speakChk").checked=settings.speak; $("rateIn").value=settings.rate; $("langSel").value=settings.lang; $("micModeSel").value=settings.micMode||"auto"; $("keyIn").value=settings.key||"";
   if (voices.some(v=>v.name===settings.voice)) $("voiceSel").value=settings.voice;
 }
 let wake = null;
@@ -918,7 +960,7 @@ document.addEventListener("visibilitychange", ()=>{ if (document.visibilityState
 
 /* ---------- boot ---------- */
 (async function boot(){
-  const had = restore(); syncSettingsUI();
+  const had = restore(); syncSettingsUI(); setMic(false);
   renderBoard(); renderSheet(); renderEval({wpW:50,cpW:0,rawCpW:0,mateW:null});
   feedAdd("system", "Play on your physical board and tell me each move. I'll answer with mine, and Stockfish judges every move you make. Say \"hint\", \"take back\", \"read the board\", or ask a question any time.");
   initClaude();
